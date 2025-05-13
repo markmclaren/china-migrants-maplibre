@@ -2,7 +2,7 @@
 
 // This is adapted from https://bl.ocks.org/mbostock/2675ff61ea5e063ede2b5d63c08020c7
 
-let map =  new maplibregl.Map({
+let map = new maplibregl.Map({
   container: "map", // container ID
   style: "cakojy469b.json",
   //style: "https://tiles.openfreemap.org/styles/positron", // style URL
@@ -13,10 +13,18 @@ let map =  new maplibregl.Map({
 
 map.setRenderWorldCopies(false);
 
+// Create and attach the starry background
+const starryBg = new MapLibreStarryBackground({
+  starCount: 1500,
+  glowColor: "blue",
+  glowIntensity: 1.0,
+});
+
 map.on("style.load", () => {
   map.setProjection({
-    type: 'globe', // Set projection to globe
-  });  
+    type: "globe", // Set projection to globe
+  });
+  starryBg.attachToMap(map, "starfield-container", "globe-glow");
 });
 
 const padding = 100; // separation between nodes
@@ -42,6 +50,13 @@ $(document).ready(function () {
   $("#yearRange").focus();
   configureLocations();
   configureSelections();
+
+  // Add event listeners for interactive elements
+  // This ensures debouncing is applied to the right events
+  $("#yearRange").on("input", formChange);
+  $(
+    "#clusterBy, #selectCompany, #selectLocation, #selectOccupation, #selectNationality"
+  ).on("change", formChange);
 });
 
 function configureLocations() {
@@ -51,8 +66,11 @@ function configureLocations() {
       locations = json;
     })
     .then(function () {
-      updateSimulationProperties();
-      formChange();
+      updateSimulationProperties(false);
+      // Since this is initial loading, use direct update
+      const filterCriteria = getFilterCriteria();
+      update(filterCriteria); // Direct call to update instead of formChange
+      //formChange();
     });
 }
 
@@ -95,34 +113,12 @@ function updateSimulationProperties(redraw) {
     document.getElementById("linkDistanceDisplay").innerText = linkDistance;
     document.getElementById("linkStrengthDisplay").innerText = linkStrength;
     if (redraw) {
-      formChange();
+      // Since this is interactive, use debounced update
+      const filterCriteria = getFilterCriteria();
+      debouncedUpdate(filterCriteria); // Use debounced version instead of formChange
+      //formChange();
     }
   }
-}
-
-function formChange() {
-  $("#yearRange").focus();
-  selectedYear = document.getElementById("yearRange").value;
-  clusterBy = document.getElementById("clusterBy").value;
-  const filterCriteria = [
-    {
-      attribute: "Company",
-      value: document.getElementById("selectCompany").value,
-    },
-    {
-      attribute: "Location",
-      value: document.getElementById("selectLocation").value,
-    },
-    {
-      attribute: "Occupation",
-      value: document.getElementById("selectOccupation").value,
-    },
-    {
-      attribute: "Nationality",
-      value: document.getElementById("selectNationality").value,
-    },
-  ];
-  update(filterCriteria);
 }
 
 // we calculate the scale given maplibre state (derived from viewport-mercator-project's code)
@@ -235,41 +231,58 @@ function filterLinks(filteredNodes, links) {
   });
 }
 
+// Add the debounce function implementation
+function debounce(func, wait) {
+  let timeout;
+  return function (...args) {
+    const context = this;
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      func.apply(context, args);
+    }, wait);
+  };
+}
+
 function update(filterCriteria) {
   //console.log("Updating");
   const filename = "json/" + selectedYear + ".json?" + new Date().getTime();
 
-  d3.json(filename).then(function (graph) {
-    graph = filterData(graph, filterCriteria);
-    //
-    graph.nodes.forEach(function (d) {
-      //d.Company = d.details.Company;
-      d.group = d.details.Company;
-    });
-    //
-    const zoom = map.getZoom();
-    const simulation = d3
-      .forceSimulation(graph.nodes)
-      // cluster by section
-      .force(
-        "cluster",
-        d3
-          .forceCluster()
-          .centers(function (d) {
-            // console.log(d.details.Location);
-            let location = locations[d.details.Location];
-            d.LngLat = new maplibregl.LngLat(location.Lng, location.Lat);
-            d.point = [location.Lng, location.Lat];
-            let coords = d3Project(d.point);
-            d.x = coords[0];
-            d.y = coords[1];
-            return d;
-          })
-          .strength(clusterStrength)
-          .centerInertia(clusterCentreInertia)
-      )
-      // apply collision with padding
-      /*
+  d3.json(filename)
+    .then(function (graph) {
+      if (!graph || !graph.nodes || !graph.links) {
+        console.error("Invalid or empty JSON data");
+        return;
+      }
+      graph = filterData(graph, filterCriteria);
+      //
+      graph.nodes.forEach(function (d) {
+        //d.Company = d.details.Company;
+        d.group = d.details.Company;
+      });
+      //
+      const zoom = map.getZoom();
+      const simulation = d3
+        .forceSimulation(graph.nodes)
+        // cluster by section
+        .force(
+          "cluster",
+          d3
+            .forceCluster()
+            .centers(function (d) {
+              // console.log(d.details.Location);
+              let location = locations[d.details.Location];
+              d.LngLat = new maplibregl.LngLat(location.Lng, location.Lat);
+              d.point = [location.Lng, location.Lat];
+              let coords = d3Project(d.point);
+              d.x = coords[0];
+              d.y = coords[1];
+              return d;
+            })
+            .strength(clusterStrength)
+            .centerInertia(clusterCentreInertia)
+        )
+        // apply collision with padding
+        /*
       .force(
         "collide",
         d3
@@ -279,229 +292,229 @@ function update(filterCriteria) {
           .strength(0)
       )
       */
+        //
+        .force(
+          "link",
+          d3
+            .forceLink(graph.links)
+            .id(function (d) {
+              return d.id;
+            })
+            .distance(linkDistance)
+            .strength(linkStrength)
+        )
+        .force("charge", d3.forceManyBody().strength(-2))
+        .stop();
+      simulation.force("link").links(graph.links);
+      simulation.tick(300);
+      //console.log(graph.nodes);
+      //console.log(graph.links);
       //
-      .force(
-        "link",
-        d3
-          .forceLink(graph.links)
-          .id(function (d) {
-            return d.id;
-          })
-          .distance(linkDistance)
-          .strength(linkStrength)
-      )
-      .force("charge", d3.forceManyBody().strength(-2))
-      .stop();
-    simulation.force("link").links(graph.links);
-    simulation.tick(300);
-    //console.log(graph.nodes);
-    //console.log(graph.links);
-    //
-    graph.nodes.forEach(function (d) {
-      p = [d.x, d.y];
-      d.LngLat = d3Unproject(p);
-      d.Lng = d.LngLat[0];
-      d.Lat = d.LngLat[1];
-    });
-    //
-    graph.links.forEach(function (d) {
-      d.line = [
-        [d.source.Lng, d.source.Lat],
-        [d.target.Lng, d.target.Lat],
-      ];
-    });
-    const colours = d3.scaleOrdinal(d3.schemeCategory10);
-    switch (clusterBy) {
-      case "NetworkClustering":
-        document.getElementById("legend").style.display = "none";
-        //console.log(graph.nodes);
-        //console.log(graph.links);
+      graph.nodes.forEach(function (d) {
+        p = [d.x, d.y];
+        d.LngLat = d3Unproject(p);
+        d.Lng = d.LngLat[0];
+        d.Lat = d.LngLat[1];
+      });
+      //
+      graph.links.forEach(function (d) {
+        d.line = [
+          [d.source.Lng, d.source.Lat],
+          [d.target.Lng, d.target.Lat],
+        ];
+      });
+      const colours = d3.scaleOrdinal(d3.schemeCategory10);
+      switch (clusterBy) {
+        case "NetworkClustering":
+          document.getElementById("legend").style.display = "none";
+          //console.log(graph.nodes);
+          //console.log(graph.links);
 
-        netClustering.cluster(graph.nodes, graph.links);
-        graph.nodes.forEach(function (d) {
-          //console.log(d);
-          d.colour = colours(d.cluster);
-        });
-        break;
-      case "BronKerborsch":
-        document.getElementById("legend").style.display = "none";
-        let edges = [];
-        graph.links.forEach(function (d) {
-          edges.push([d.source_id, d.target_id]);
-        });
-        //console.log(edges);
-        let cliques = BronKerbosch(edges);
-        let idx;
-        graph.nodes.forEach(function (d) {
-          idx = 0;
-          cliques.forEach(function (clique, cliqueIdx) {
-            if (clique.includes(d.id)) {
-              idx = cliqueIdx + 1;
+          netClustering.cluster(graph.nodes, graph.links);
+          graph.nodes.forEach(function (d) {
+            //console.log(d);
+            d.colour = colours(d.cluster);
+          });
+          break;
+        case "BronKerborsch":
+          document.getElementById("legend").style.display = "none";
+          let edges = [];
+          graph.links.forEach(function (d) {
+            edges.push([d.source_id, d.target_id]);
+          });
+          //console.log(edges);
+          let cliques = BronKerbosch(edges);
+          let idx;
+          graph.nodes.forEach(function (d) {
+            idx = 0;
+            cliques.forEach(function (clique, cliqueIdx) {
+              if (clique.includes(d.id)) {
+                idx = cliqueIdx + 1;
+              }
+            });
+            d.colour = colours(idx);
+          });
+
+          break;
+        default:
+          document.getElementById("legend").style.display = "block";
+          graph.nodes = colourGroups(graph.nodes);
+      }
+      //
+
+      //
+      const nodes = GeoJSON.parse(graph.nodes, {
+        Point: ["Lat", "Lng"],
+        include: ["id", "details", "colour"],
+      });
+      const edges = GeoJSON.parse(graph.links, {
+        LineString: "line",
+        include: ["details", "source", "target", "source_id", "target_id"],
+      });
+      const locationArray = Object.entries(locations).map(([name, value]) => ({
+        ...value,
+        name,
+      }));
+      const locationsGeoJson = GeoJSON.parse(locationArray, {
+        Point: ["Lat", "Lng"],
+      });
+
+      if (mapLoaded) {
+        init(edges, nodes, locationsGeoJson, centre);
+        clearFeatureStates();
+      } else {
+        map.on("load", function () {
+          map.addSource("locations", {
+            type: "geojson",
+            data: {
+              type: "FeatureCollection",
+              features: [],
+            },
+          });
+          map.addLayer({
+            id: "locations-layer",
+            type: "circle",
+            source: "locations",
+            paint: {
+              "circle-radius": 10,
+              "circle-color": "red",
+              "circle-stroke-color": "white",
+              "circle-opacity": 0.2,
+            },
+          });
+
+          map.addSource("edges", {
+            type: "geojson",
+            generateId: true,
+            data: {
+              type: "FeatureCollection",
+              features: [],
+            },
+          });
+
+          map.addLayer({
+            id: "edges-layer",
+            type: "line",
+            source: "edges",
+            paint: {
+              "line-color": "#666",
+              "line-opacity": [
+                "case",
+                ["==", ["feature-state", "neighbour"], null],
+                0.8,
+                ["==", ["feature-state", "neighbour"], true],
+                0.8,
+                ["==", ["feature-state", "neighbour"], false],
+                0.5,
+                0.8,
+              ],
+              "line-width": [
+                "case",
+                ["==", ["feature-state", "neighbour"], null],
+                1,
+                ["==", ["feature-state", "neighbour"], true],
+                3,
+                ["==", ["feature-state", "neighbour"], false],
+                0.8,
+                1,
+              ],
+            },
+          });
+
+          map.addSource("nodes", {
+            type: "geojson",
+            promoteId: "id",
+            data: {
+              type: "FeatureCollection",
+              features: [],
+            },
+          });
+
+          map.addLayer({
+            id: "nodes-layer",
+            type: "circle",
+            source: "nodes",
+            paint: {
+              "circle-radius": 5,
+              "circle-stroke-width": 2,
+              "circle-color": ["get", "colour"],
+              "circle-stroke-color": "white",
+              "circle-opacity": [
+                "case",
+                ["==", ["feature-state", "neighbour"], null],
+                1,
+                ["==", ["feature-state", "neighbour"], true],
+                1,
+                ["==", ["feature-state", "neighbour"], false],
+                0.3,
+                1,
+              ],
+            },
+          });
+
+          map.on("click", (e) => {
+            if (map.getCanvas().style.cursor != "pointer") {
+              clearFeatureStates();
             }
           });
-          d.colour = colours(idx);
-        });
 
-        break;
-      default:
-        document.getElementById("legend").style.display = "block";
-        graph.nodes = colourGroups(graph.nodes);
-    }
-    //
-
-    //
-    const nodes = GeoJSON.parse(graph.nodes, {
-      Point: ["Lat", "Lng"],
-      include: ["id", "details", "colour"],
-    });
-    const edges = GeoJSON.parse(graph.links, {
-      LineString: "line",
-      include: ["details", "source", "target", "source_id", "target_id"],
-    });
-    const locationArray = Object.entries(locations).map(([name, value]) => ({
-      ...value,
-      name,
-    }));
-    const locationsGeoJson = GeoJSON.parse(locationArray, {
-      Point: ["Lat", "Lng"],
-    });
-
-    if (mapLoaded) {
-      init(edges, nodes, locationsGeoJson, centre);
-      clearFeatureStates();
-    } else {
-      map.on("load", function () {
-        map.addSource("locations", {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-        });
-        map.addLayer({
-          id: "locations-layer",
-          type: "circle",
-          source: "locations",
-          paint: {
-            "circle-radius": 10,
-            "circle-color": "red",
-            "circle-stroke-color": "white",
-            "circle-opacity": 0.2,
-          },
-        });
-
-        map.addSource("edges", {
-          type: "geojson",
-          generateId: true,
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-        });
-
-        map.addLayer({
-          id: "edges-layer",
-          type: "line",
-          source: "edges",
-          paint: {
-            "line-color": "#666",
-            "line-opacity": [
-              "case",
-              ["==", ["feature-state", "neighbour"], null],
-              0.8,
-              ["==", ["feature-state", "neighbour"], true],
-              0.8,
-              ["==", ["feature-state", "neighbour"], false],
-              0.5,
-              0.8,
-            ],
-            "line-width": [
-              "case",
-              ["==", ["feature-state", "neighbour"], null],
-              1,
-              ["==", ["feature-state", "neighbour"], true],
-              3,
-              ["==", ["feature-state", "neighbour"], false],
-              0.8,
-              1,
-            ],
-          },
-        });
-
-        map.addSource("nodes", {
-          type: "geojson",
-          promoteId: "id",
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-        });
-
-        map.addLayer({
-          id: "nodes-layer",
-          type: "circle",
-          source: "nodes",
-          paint: {
-            "circle-radius": 5,
-            "circle-stroke-width": 2,
-            "circle-color": ["get", "colour"],
-            "circle-stroke-color": "white",
-            "circle-opacity": [
-              "case",
-              ["==", ["feature-state", "neighbour"], null],
-              1,
-              ["==", ["feature-state", "neighbour"], true],
-              1,
-              ["==", ["feature-state", "neighbour"], false],
-              0.3,
-              1,
-            ],
-          },
-        });
-
-        map.on("click", (e) => {
-          if (map.getCanvas().style.cursor != "pointer") {
-            clearFeatureStates();
-          }
-        });
-
-        map.on("click", "nodes-layer", (e) => {
-          const selectedNode = e.features[0].id;
-          let allNodes = map.querySourceFeatures("nodes", {});
-          let allEdges = map.querySourceFeatures("edges", {});
-          let matchedNodes = new Set();
-          matchedNodes.add(selectedNode);
-          allEdges.forEach(function (d) {
-            let neighbour = false;
-            if (selectedNode === d.properties.source_id) {
-              matchedNodes.add(d.properties.target_id);
-              neighbour = true;
-            }
-            if (selectedNode === d.properties.target_id) {
-              matchedNodes.add(d.properties.source_id);
-              neighbour = true;
-            }
-            setEdgeNeighbourState(d.id, neighbour);
+          map.on("click", "nodes-layer", (e) => {
+            const selectedNode = e.features[0].id;
+            let allNodes = map.querySourceFeatures("nodes", {});
+            let allEdges = map.querySourceFeatures("edges", {});
+            let matchedNodes = new Set();
+            matchedNodes.add(selectedNode);
+            allEdges.forEach(function (d) {
+              let neighbour = false;
+              if (selectedNode === d.properties.source_id) {
+                matchedNodes.add(d.properties.target_id);
+                neighbour = true;
+              }
+              if (selectedNode === d.properties.target_id) {
+                matchedNodes.add(d.properties.source_id);
+                neighbour = true;
+              }
+              setEdgeNeighbourState(d.id, neighbour);
+            });
+            allNodes.forEach(function (d) {
+              setNodeNeighbourState(d.id, matchedNodes.has(d.id));
+            });
           });
-          allNodes.forEach(function (d) {
-            setNodeNeighbourState(d.id, matchedNodes.has(d.id));
-          });
-        });
 
-        map.on("mouseenter", "nodes-layer", (e) => {
-          map.getCanvas().style.cursor = "pointer";
-          const data = e.features[0];
-          const coordinates = data.geometry.coordinates.slice();
-          // Ensure that if the map is zoomed out such that multiple
-          // copies of the feature are visible, the popup appears
-          // over the copy being pointed to.
-          while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
-            coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
-          }
-          //
-          let html;
-          details = JSON.parse(data.properties.details);
-          html = `
+          map.on("mouseenter", "nodes-layer", (e) => {
+            map.getCanvas().style.cursor = "pointer";
+            const data = e.features[0];
+            const coordinates = data.geometry.coordinates.slice();
+            // Ensure that if the map is zoomed out such that multiple
+            // copies of the feature are visible, the popup appears
+            // over the copy being pointed to.
+            while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+              coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+            }
+            //
+            let html;
+            details = JSON.parse(data.properties.details);
+            html = `
                 <div class="row0">${data.properties.id}</div>
                 <div class="row0">${details.Occupation}</div>
                 <div class="row0">${details.Nationality}</div>
@@ -509,25 +522,73 @@ function update(filterCriteria) {
                 <div class="row1 person">${details.Location}</div>
                 <div class="row2">Person</div>
               `;
-          popup.setLngLat(coordinates).setHTML(html).addTo(map);
-        });
+            popup.setLngLat(coordinates).setHTML(html).addTo(map);
+          });
 
-        map.on("mouseleave", "nodes-layer", (e) => {
-          map.getCanvas().style.cursor = "";
-          popup.remove();
-        });
+          map.on("mouseleave", "nodes-layer", (e) => {
+            map.getCanvas().style.cursor = "";
+            popup.remove();
+          });
 
-        map.on("zoomend", function () {
-          updateSimulationProperties();
-          formChange();
-        });
+          map.on("zoomend", function () {
+            //updateSimulationProperties();
+            //formChange();
+            updateSimulationProperties(false); // Update properties but don't redraw
+            // Since zooming is interactive, use debounced update
+            const filterCriteria = getFilterCriteria();
+            debouncedUpdate(filterCriteria); // Direct debounced call instead of formChange
+          });
 
-        mapLoaded = true;
-        //console.log("Map loaded");
-        init(edges, nodes, locationsGeoJson);
-      });
-    }
-  });
+          mapLoaded = true;
+          //console.log("Map loaded");
+          init(edges, nodes, locationsGeoJson);
+        });
+      }
+    })
+    .catch(function (error) {
+      console.error("Error loading JSON data:", error);
+    });
+}
+
+// 3. Define the debounced version AFTER update is defined
+const debouncedUpdate = debounce(update, 300);
+
+// 2. Extract filter criteria to a reusable function
+function getFilterCriteria() {
+  return [
+    {
+      attribute: "Company",
+      value: document.getElementById("selectCompany").value,
+    },
+    {
+      attribute: "Location",
+      value: document.getElementById("selectLocation").value,
+    },
+    {
+      attribute: "Occupation",
+      value: document.getElementById("selectOccupation").value,
+    },
+    {
+      attribute: "Nationality",
+      value: document.getElementById("selectNationality").value,
+    },
+  ];
+}
+
+function formChange() {
+  $("#yearRange").focus();
+  selectedYear = document.getElementById("yearRange").value;
+  clusterBy = document.getElementById("clusterBy").value;
+  const filterCriteria = getFilterCriteria();
+  //debouncedUpdate(filterCriteria);
+  //update(filterCriteria);
+  if (!mapLoaded || document.activeElement.id === "yearRange") {
+    // For initial load or when user is actively dragging the year range
+    update(filterCriteria);
+  } else {
+    // For all other interactions, use debouncing
+    debouncedUpdate(filterCriteria);
+  }
 }
 
 function setEdgeNeighbourState(id, state) {
@@ -642,7 +703,7 @@ function colourGroups(nodes) {
     colour = colourArray[cidx];
     legendOutput += `
     <dt style="background-color: ${colour}"></dt>
-    <dd>${d  || 'Unattached'}</dd>
+    <dd>${d || "Unattached"}</dd>
     `;
   });
   legendOutput += "</dl>";

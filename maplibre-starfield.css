@@ -1,0 +1,44 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #172A4A
+}
+#starfield-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none; /* Allow clicks to pass through to the map */
+}
+#globe-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none; /* Allow clicks to pass through to the map */
+}
+#map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+}
+/* Make the map background transparent to see the stars */
+.maplibregl-canvas {
+  background: transparent !important;
+}
+/* Always ensure the glow is visible */
+.globe-glow {
+  opacity: 1 !important;
+  transition: r 0.5s ease; /* Smooth transition when radius changes */
+}
