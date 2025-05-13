@@ -9,6 +9,7 @@ let map = new maplibregl.Map({
   //style: "positron.json", // style URL
   zoom: 3, // starting zoom
   center: [113.26, 23.13], // // starting center in [lng, lat]
+  canvasContextAttributes: { antialias: true },
 });
 
 map.setRenderWorldCopies(false);
