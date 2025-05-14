@@ -1,7 +1,7 @@
 /**
- * MapLibreStarryBackground.js
+ * MapLibreStarryBackground.js - Enhanced Version
  * A modular starfield and atmospheric glow for MapLibre Globe
- * Based on D3.js for rich visual effects
+ * Vanilla JavaScript implementation with improved corona effect
  */
 
 class MapLibreStarryBackground {
@@ -16,7 +16,7 @@ class MapLibreStarryBackground {
         middle: "rgba(100, 150, 255, 0.7)",
         outer: "rgba(70, 120, 255, 0.4)",
         fade: "rgba(40, 80, 220, 0)"
-      }
+      },
     };
 
     this.mapInstance = null;
@@ -25,6 +25,7 @@ class MapLibreStarryBackground {
     this.lastPitch = 0;
     this.lastCenter = null;
     this.glowGradientId = "globe-glow-gradient";
+    this.coronaGradientId = "globe-corona-gradient";
     this.containers = {
       starfield: null,
       glow: null
@@ -32,7 +33,7 @@ class MapLibreStarryBackground {
     this.elements = {
       starfieldSvg: null,
       glowSvg: null,
-      glowCircle: null
+      glowCircle: null,
     };
   }
 
@@ -72,26 +73,44 @@ class MapLibreStarryBackground {
   }
 
   /**
-   * Create the starfield using D3
+   * Create an SVG element with the given attributes
+   * @param {string} type - The SVG element type to create
+   * @param {Object} attributes - Key-value pairs of attributes to set
+   * @param {string} ns - Namespace (defaults to SVG namespace)
+   * @returns {SVGElement} - The created SVG element
+   */
+  createSvgElement(type, attributes = {}, ns = "http://www.w3.org/2000/svg") {
+    const element = document.createElementNS(ns, type);
+
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+
+    return element;
+  }
+
+  /**
+   * Create the starfield using vanilla JavaScript
    */
   createStarfield() {
     if (!this.containers.starfield) return;
 
     // Clear any existing content
     this.containers.starfield.innerHTML = '';
-    
+
     // Get dimensions
     const width = this.containers.starfield.clientWidth;
     const height = this.containers.starfield.clientHeight;
 
-    // Create SVG with D3
-    const svg = d3.select(this.containers.starfield)
-      .append("svg")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("viewBox", `0 0 ${width} ${height}`)
-      .style("background-color", "transparent");
+    // Create SVG element
+    const svg = this.createSvgElement("svg", {
+      width: width,
+      height: height,
+      viewBox: `0 0 ${width} ${height}`
+    });
+    svg.style.backgroundColor = "transparent";
 
+    this.containers.starfield.appendChild(svg);
     this.elements.starfieldSvg = svg;
 
     // Random position function
@@ -147,6 +166,7 @@ class MapLibreStarryBackground {
       star.initialPos = { ...star.pos };
       const brightness = Math.random() * 0.6 + 0.4;
       star.color = hslToRgb(star.hue, 0.2, brightness);
+      star.element = null; // Will store reference to DOM element
       this.stars.push(star);
     }
 
@@ -154,50 +174,26 @@ class MapLibreStarryBackground {
     this.stars.sort((a, b) => a.pos.z - b.pos.z);
 
     // Create star elements
-    const starElements = svg
-      .selectAll(".star")
-      .data(this.stars)
-      .enter()
-      .append("circle")
-      .attr("class", "star")
-      .attr("cx", (d) => d.pos.x)
-      .attr("cy", (d) => d.pos.y)
-      .attr("r", (d) => d.size)
-      .style("fill", (d) => d.color)
-      .style("opacity", (d) => mapRange(d.pos.z, 0, 50, 0.4, 1));
-
-    // Add twinkling effect
-    const twinkle = () => {
-      svg.selectAll(".star").each(function (d, i) {
-        const duration = 1000 + (i % 5) * 500 + Math.random() * 2000;
-        d3.select(this)
-          .transition()
-          .duration(duration)
-          .style("opacity", () => 0.4 + Math.random() * 0.6)
-          .on("end", function () {
-            d3.select(this).call(() => twinkleStar(this));
-          });
+    this.stars.forEach(star => {
+      const circle = this.createSvgElement("circle", {
+        class: "star",
+        cx: star.pos.x,
+        cy: star.pos.y,
+        r: star.size,
+        fill: star.color,
+        opacity: mapRange(star.pos.z, 0, 50, 0.4, 1)
       });
-    };
 
-    const twinkleStar = (star) => {
-      d3.select(star)
-        .transition()
-        .duration(1000 + Math.random() * 2000)
-        .style("opacity", () => 0.4 + Math.random() * 0.6)
-        .on("end", function () {
-          twinkleStar(this);
-        });
-    };
+      star.element = circle;
+      svg.appendChild(circle);
 
-    // Start twinkling
-    twinkle();
+    });
 
     return svg;
   }
 
   /**
-   * Create the globe glow effect
+   * Create the globe glow and corona effects
    */
   createGlobeGlow() {
     if (!this.containers.glow) return;
@@ -209,20 +205,22 @@ class MapLibreStarryBackground {
     const width = this.containers.glow.clientWidth;
     const height = this.containers.glow.clientHeight;
 
-    // Create SVG with D3
-    const svg = d3.select(this.containers.glow)
-      .append("svg")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("viewBox", `0 0 ${width} ${height}`)
-      .style("background-color", "transparent");
+    // Create SVG element
+    const svg = this.createSvgElement("svg", {
+      width: width,
+      height: height,
+      viewBox: `0 0 ${width} ${height}`
+    });
+    svg.style.backgroundColor = "transparent";
 
+    this.containers.glow.appendChild(svg);
     this.elements.glowSvg = svg;
 
-    // Create defs for the gradient
-    const defs = svg.append("defs");
-    
-    // Create the gradient
+    // Create defs for the gradients
+    const defs = this.createSvgElement("defs");
+    svg.appendChild(defs);
+
+    // Create the gradients
     this.updateGlowGradient(defs);
 
     // Calculate initial radius based on current map state or fallback to viewport size
@@ -232,62 +230,119 @@ class MapLibreStarryBackground {
     } else {
       // Fallback calculation if no map instance is available yet
       const viewportSize = Math.min(width, height);
-      initialRadius = viewportSize * 0.1; // 10% of the viewport
+      initialRadius = viewportSize * 0.35; // 35% of the viewport
     }
 
-    // Create the glow circle
-    const glowCircle = svg
-      .append("circle")
-      .attr("class", "globe-glow")
-      .attr("cx", width / 2)
-      .attr("cy", height / 2)
-      .attr("r", initialRadius)
-      .style("fill", `url(#${this.glowGradientId})`)
-      .style("filter", `blur(${initialRadius * 0.1}px)`)
-      .style("opacity", this.config.glowIntensity);
+    // Calculate corona radius (slightly larger than the globe itself)
+    const coronaRadius = initialRadius * 1.01;
 
+    // Create the corona effect - ENHANCED VERSION WITH MULTIPLE LAYERS
+    this.createEnhancedCorona(svg, width, height, coronaRadius);
+
+    // Create the glow circle
+    const glowCircle = this.createSvgElement("circle", {
+      class: "globe-glow",
+      cx: width / 2,
+      cy: height / 2,
+      r: initialRadius * 2,
+      fill: `url(#${this.glowGradientId})`
+    });
+
+    glowCircle.style.filter = `blur(${initialRadius * 0.1}px)`;
+    glowCircle.style.opacity = this.config.glowIntensity;
+
+    svg.appendChild(glowCircle);
     this.elements.glowCircle = glowCircle;
 
     return svg;
   }
 
   /**
-   * Update the glow gradient
-   * @param {Object} defs - D3 selection for SVG defs
+   * Create enhanced corona effect using a custom SVG structure
+   * @param {SVGElement} svg - SVG element to append to
+   * @param {number} width - Container width
+   * @param {number} height - Container height
+   * @param {number} baseRadius - Base radius for corona
    */
+  createEnhancedCorona(svg, width, height, baseRadius) {
+    // Clear any existing corona group
+    if (this.elements.coronaGroup) {
+      svg.removeChild(this.elements.coronaGroup);
+    }
+
+    // Create a group to hold the custom corona SVG
+    const coronaGroup = this.createSvgElement("g", {
+      class: "corona-group"
+    });
+    svg.appendChild(coronaGroup);
+    this.elements.coronaGroup = coronaGroup;
+
+    // Inject the custom SVG structure
+    const customCoronaSvg = `
+      <defs>
+        <radialGradient id="customCoronaGlow" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+          <stop offset="40%" stop-color="#FFFFE0" stop-opacity="1"/>
+          <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+          <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0.6"/>
+          <stop offset="85%" stop-color="#FFFFFF" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <circle cx="${width / 2}" cy="${height / 2}" r="${baseRadius}" fill="url(#customCoronaGlow)" style="filter: blur(${baseRadius * 0.015}px); mix-blend-mode: screen;"/>
+    `;
+
+    // Create a temporary container to parse the SVG string
+    const tempContainer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    tempContainer.innerHTML = customCoronaSvg;
+
+    // Append the parsed SVG elements to the corona group
+    Array.from(tempContainer.children).forEach(child => {
+      coronaGroup.appendChild(child);
+    });
+  }
+
+  /**
+   * Update the glow gradient
+   * @param {SVGDefsElement} defs - SVG defs element
+   */
+  
   updateGlowGradient(defs) {
     // Remove existing gradient if it exists
-    defs.select(`#${this.glowGradientId}`).remove();
-    
+    const existingGradient = defs.querySelector(`#${this.glowGradientId}`);
+    if (existingGradient) {
+      defs.removeChild(existingGradient);
+    }
+
     // Get color values from config
     const colors = this.config.glowColors;
-    
+
     // Create new gradient
-    const gradient = defs
-      .append("radialGradient")
-      .attr("id", this.glowGradientId)
-      .attr("cx", "50%")
-      .attr("cy", "50%")
-      .attr("r", "50%");
+    const gradient = this.createSvgElement("radialGradient", {
+      id: this.glowGradientId,
+      cx: "50%",
+      cy: "50%",
+      r: "50%"
+    });
 
     // Define gradient stops based on selected color
-    gradient
-      .append("stop")
-      .attr("offset", "0%")
-      .attr("stop-color", colors.inner);
-    gradient
-      .append("stop")
-      .attr("offset", "30%")
-      .attr("stop-color", colors.middle);
-    gradient
-      .append("stop")
-      .attr("offset", "60%")
-      .attr("stop-color", colors.outer);
-    gradient
-      .append("stop")
-      .attr("offset", "100%")
-      .attr("stop-color", colors.fade);
+    const stops = [
+      { offset: "0%", color: colors.inner },
+      { offset: "30%", color: colors.middle },
+      { offset: "60%", color: colors.outer },
+      { offset: "100%", color: colors.fade }
+    ];
+
+    stops.forEach(stop => {
+      const stopElement = this.createSvgElement("stop", {
+        offset: stop.offset,
+        "stop-color": stop.color
+      });
+      gradient.appendChild(stopElement);
+    });
+
+    defs.appendChild(gradient);
   }
+  
 
   /**
    * Update star positions based on map movement
@@ -296,11 +351,10 @@ class MapLibreStarryBackground {
    * @param {number} lngDelta - Change in map longitude
    */
   updateStarPositions(bearingDelta, pitchDelta, lngDelta) {
-    if (!this.elements.starfieldSvg) return;
+    if (!this.elements.starfieldSvg || !this.stars.length) return;
 
-    const svg = this.elements.starfieldSvg;
-    const width = parseInt(svg.attr("width"));
-    const height = parseInt(svg.attr("height"));
+    const width = parseInt(this.elements.starfieldSvg.getAttribute("width"));
+    const height = parseInt(this.elements.starfieldSvg.getAttribute("height"));
 
     // Movement factors - adjust these to control how much stars move
     const bearingFactor = 0.5; // How much bearing affects horizontal movement
@@ -308,24 +362,25 @@ class MapLibreStarryBackground {
     const lngFactor = 2.0; // How much longitude change affects horizontal movement
 
     // Update each star's position
-    svg.selectAll(".star").each(function (d, i) {
+    this.stars.forEach(star => {
+      if (!star.element) return;
+
       // Calculate new position based on map movement
       // Using modulo to wrap around screen edges
-      let newX =
-        (d.pos.x + bearingDelta * bearingFactor + lngDelta * lngFactor) %
-        width;
-      let newY = (d.pos.y + pitchDelta * pitchFactor) % height;
+      let newX = (star.pos.x + bearingDelta * bearingFactor + lngDelta * lngFactor) % width;
+      let newY = (star.pos.y + pitchDelta * pitchFactor) % height;
 
       // Handle negative values by wrapping to the other side
       if (newX < 0) newX += width;
       if (newY < 0) newY += height;
 
       // Update star data
-      d.pos.x = newX;
-      d.pos.y = newY;
+      star.pos.x = newX;
+      star.pos.y = newY;
 
       // Update visual position
-      d3.select(this).attr("cx", newX).attr("cy", newY);
+      star.element.setAttribute("cx", newX);
+      star.element.setAttribute("cy", newY);
     });
   }
 
@@ -347,34 +402,41 @@ class MapLibreStarryBackground {
    */
   calculateGlowRadius(map) {
     if (!map) return 200; // Default fallback value
-    
+
     const transform = map._getTransformForUpdate();
     if (!transform) return 200; // Another fallback if transform is not available
-    
+
     const radius = this.getGlobeRadiusPixels(transform.worldSize, transform.center.lat);
-    return Math.ceil(radius * 1.5);
+    return Math.ceil(radius);
   }
 
   /**
-   * Update the glow effect based on map state
+   * Update the glow and corona effects based on map state
    * @param {Object} map - MapLibre map instance
    */
   updateGlobeGlow(map) {
-    if (!this.elements.glowCircle || !map) return;
-    
+    if (!map) return;
+
     const width = this.containers.glow.clientWidth;
     const height = this.containers.glow.clientHeight;
-    
-    // Calculate new glow radius
-    const glowRadius = this.calculateGlowRadius(map);
-    
+
+    // Calculate base globe radius
+    const baseRadius = this.calculateGlowRadius(map);
+
     // Update glow position and size
-    this.elements.glowCircle
-      .attr("cx", width / 2)
-      .attr("cy", height / 2)
-      .attr("r", glowRadius)
-      .style("filter", `blur(${glowRadius * 0.1}px)`)
-      .style("opacity", this.config.glowIntensity);
+    if (this.elements.glowCircle) {
+      this.elements.glowCircle.setAttribute("cx", width / 2);
+      this.elements.glowCircle.setAttribute("cy", height / 2);
+      this.elements.glowCircle.setAttribute("r", baseRadius * 2); // Larger radius for the overall glow
+      this.elements.glowCircle.style.filter = `blur(${baseRadius * 0.1}px)`;
+      this.elements.glowCircle.style.opacity = this.config.glowIntensity;
+    }
+
+    // Update corona size dynamically
+    if (this.elements.coronaGroup) {
+      const coronaRadius = baseRadius * 1.01; // Slightly larger than the globe
+      this.createEnhancedCorona(this.elements.glowSvg, width, height, coronaRadius);
+    }
   }
 
   /**
@@ -383,11 +445,11 @@ class MapLibreStarryBackground {
    */
   handleResize(map) {
     if (!map) return;
-    
+
     // Recreate visual elements
     this.createStarfield();
     this.createGlobeGlow();
-    
+
     // Update the glow based on current map state
     this.updateGlobeGlow(map);
   }
@@ -405,27 +467,27 @@ class MapLibreStarryBackground {
     }
 
     this.mapInstance = map;
-    
+
     // Setup containers
     if (!this.setupContainers(starfieldContainerId, glowContainerId)) {
       return;
     }
-    
+
     // Make sure the map canvas has a transparent background
     const canvas = map.getCanvas();
     if (canvas) {
       canvas.style.background = "transparent";
     }
-    
+
     // Create starfield and glow
     this.createStarfield();
     this.createGlobeGlow();
-    
+
     // Store initial values for comparison
     this.lastCenter = map.getCenter();
     this.lastBearing = map.getBearing();
     this.lastPitch = map.getPitch();
-    
+
     // Set up move event listener
     map.on("move", () => {
       const currentBearing = map.getBearing();
@@ -439,7 +501,7 @@ class MapLibreStarryBackground {
 
       // Update star positions
       this.updateStarPositions(bearingDelta, pitchDelta, lngDelta);
-      
+
       // Update glow
       this.updateGlobeGlow(map);
 
@@ -448,35 +510,35 @@ class MapLibreStarryBackground {
       this.lastPitch = currentPitch;
       this.lastCenter = currentCenter;
     });
-    
+
     // Handle zoom events
     map.on("zoom", () => {
       this.updateGlobeGlow(map);
     });
-    
+
     // Handle idle events
     map.on("idle", () => {
       this.updateGlobeGlow(map);
     });
-    
+
     // Handle window resize
     window.addEventListener("resize", () => {
       this.handleResize(map);
     });
-    
+
     // Update glow when style is loaded
     map.on("style.load", () => {
       setTimeout(() => {
         this.updateGlobeGlow(map);
       }, 100);
     });
-    
+
     // Update everything after a short delay to ensure proper positioning
     setTimeout(() => {
       this.updateGlobeGlow(map);
     }, 200);
   }
-  
+
   /**
    * Update configuration options
    * @param {Object} options - New configuration options
@@ -486,19 +548,6 @@ class MapLibreStarryBackground {
     if (options.glowIntensity !== undefined) {
       this.config.glowIntensity = options.glowIntensity;
     }
-    
-    if (options.starCount !== undefined) {
-      this.config.starCount = options.starCount;
-    }
-    
-    // Update visual elements if they exist
-    if (this.elements.glowCircle) {
-      this.elements.glowCircle.style("opacity", this.config.glowIntensity);
-    }
-    
-    // Update everything if map instance exists
-    if (this.mapInstance) {
-      this.updateGlobeGlow(this.mapInstance);
-    }
   }
+
 }
